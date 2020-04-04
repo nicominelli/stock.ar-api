@@ -1,0 +1,139 @@
+from app import db
+
+
+class BaseModelWithoutTimestamps(db.Model):
+    __abstract__ = True
+    id = db.Column(db.Integer, primary_key=True)
+
+    @property
+    def base_dict(self):
+        return {'id': self.id}
+
+    @classmethod
+    def get(cls, id):
+        return cls.query.filter(cls.id == id).first()
+
+    @classmethod
+    def select(cls, *args):
+        return cls.query.filter(*args)
+
+    def save(self):
+        db.session.add(self)
+        db.session.flush()
+
+    def delete(self):
+        db.session.delete(self)
+        db.session.flush()
+
+
+class BaseModel(BaseModelWithoutTimestamps):
+    __abstract__ = True
+    date_created = db.Column(db.DateTime, default=db.func.current_timestamp())
+    date_updated = db.Column(db.DateTime, default=db.func.current_timestamp(),
+                             onupdate=db.func.current_timestamp())
+    date_deleted = db.Column(db.DateTime)
+
+    @classmethod
+    def get_valid(cls, id):
+        return cls.query.filter(cls.id == id, cls.date_deleted.is_(None)).first()
+
+    def save(self):
+        self.date_updated = db.func.current_timestamp()
+        super().save()
+
+    def delete(self, physically=False):
+        if physically:
+            super().delete()
+        else:
+            self.date_deleted = db.func.current_timestamp()
+            self.save()
+
+    @property
+    def base_dict(self):
+        data = super().base_dict
+        data.update({
+            'date_created': self.date_created,
+            'date_updated': self.date_updated,
+            'date_deleted': self.date_deleted
+        })
+        return dict((k, v) for k, v in data.items() if v)
+
+
+class User(BaseModel):
+    username = db.Column(db.String(256), nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+    role = db.relationship('Role')
+    role_id = db.Column(db.Integer, db.ForeignKey('role.id'), nullable=False)
+
+    @property
+    def to_dict(self):
+        data = super().base_dict
+        data.update({
+            'username': self.username,
+            'role_id': self.role_id
+        })
+        return dict((k, v) for k, v in data.items() if v)
+
+
+class Role(BaseModel):
+    name = db.Column(db.String(256), nullable=False)
+
+    @property
+    def to_dict(self):
+        data = super().base_dict
+        data.update({
+            'name': self.name
+        })
+        return dict((k, v) for k, v in data.items() if v)
+
+
+class Floor(BaseModel):
+    name = db.Column(db.String(256), nullable=False)
+    blueprint = db.Column(db.String(256), nullable=True)
+
+    def get_environments(self):
+        return [i for i in self.environments if not i.date_deleted]
+
+    @property
+    def to_dict(self):
+        data = super().base_dict
+        data.update({
+            'name': self.name,
+            'blueprint': self.blueprint,
+            'environments': [i.id for i in self.get_environments()]
+        })
+        return dict((k, v) for k, v in data.items() if v)
+
+
+class Environment(BaseModel):
+    name = db.Column(db.String(256), nullable=False)
+    floor = db.relationship('Floor', backref='environments')
+    floor_id = db.Column(db.Integer, db.ForeignKey('floor.id'), nullable=False)
+    type = db.relationship('EnvironmentType')
+    type_id = db.Column(db.Integer, db.ForeignKey('environment_type.id'), nullable=False)
+
+    def __init__(self, name=None, type_id=None):
+        self.name = name
+        self.type_id = type_id
+
+    @property
+    def to_dict(self):
+        data = super().base_dict
+        data.update({
+            'name': self.name,
+            'floor_id': self.floor_id,
+            'type_id': self.type_id
+        })
+        return data
+
+
+class EnvironmentType(BaseModelWithoutTimestamps):
+    name = db.Column(db.String(256), nullable=False)
+
+    @property
+    def to_dict(self):
+        data = super().base_dict
+        data.update({
+            'name': self.name
+        })
+        return data
